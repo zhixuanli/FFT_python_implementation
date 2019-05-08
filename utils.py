@@ -1,136 +1,8 @@
 import numpy as np
+import cv2
+import os
 
-
-def DFT_1D(fx):
-    fx = np.asarray(fx, dtype=complex)
-    M = fx.shape[0]
-    fu = fx.copy()
-
-    for i in range(M):
-        u = i
-        sum = 0
-        for j in range(M):
-            x = j
-            tmp = fx[x]*np.exp(-2j*np.pi*x*u*np.divide(1, M, dtype=complex))
-            sum += tmp
-        # print(sum)
-        fu[u] = sum
-    # print(fu)
-
-    return fu
-
-
-def inverseDFT_1D(fu):
-    fu = np.asarray(fu, dtype=complex)
-    M = fu.shape[0]
-    fx = np.zeros(M, dtype=complex)
-
-    for i in range(M):
-        x = i
-        sum = 0
-        for j in range(M):
-            u = j
-            tmp = fu[u]*np.exp(2j*np.pi*x*u*np.divide(1, M, dtype=complex))
-            sum += tmp
-        fx[x] = np.divide(sum, M, dtype=complex)
-
-    return fx
-
-
-def FFT_1D(fx):
-    """ use recursive method to speed up"""
-    fx = np.asarray(fx, dtype=complex)
-    M = fx.shape[0]
-    minDivideSize = 4
-
-    if M % 2 != 0:
-        raise ValueError("the input size must be 2^n")
-
-    if M <= minDivideSize:
-        return DFT_1D(fx)
-    else:
-        fx_even = FFT_1D(fx[::2])  # compute the even part
-        fx_odd = FFT_1D(fx[1::2])  # compute the odd part
-        W_ux_2k = np.exp(-2j * np.pi * np.arange(M) / M)
-
-        f_u = fx_even + fx_odd * W_ux_2k[:M//2]
-
-        f_u_plus_k = fx_even + fx_odd * W_ux_2k[M//2:]
-
-        fu = np.concatenate([f_u, f_u_plus_k])
-
-    return fu
-
-
-def inverseFFT_1D(fu):
-    """ use recursive method to speed up"""
-    fu = np.asarray(fu, dtype=complex)
-    fu_conjugate = np.conjugate(fu)
-
-    fx = FFT_1D(fu_conjugate)
-
-    fx = np.conjugate(fx)
-    fx = fx / fu.shape[0]
-
-    return fx
-
-
-def FFT_2D(fx):
-    h, w = fx.shape[0], fx.shape[1]
-
-    fu = np.zeros(fx.shape, dtype=complex)
-
-    if len(fx.shape) == 2:
-        for i in range(h):
-            fu[i, :] = FFT_1D(fx[i, :])
-
-        for i in range(w):
-            fu[:, i] = FFT_1D(fu[:, i])
-    elif len(fx.shape) == 3:
-        for ch in range(3):
-            fu[:, :, ch] = FFT_2D(fx[:, :, ch])
-
-    return fu
-
-
-def inverseDFT_2D(fu):
-    h, w = fu.shape[0], fu.shape[1]
-
-    fx = np.zeros(fu.shape, dtype=complex)
-
-    if len(fu.shape) == 2:
-        for i in range(h):
-            fx[i, :] = inverseDFT_1D(fu[i, :])
-
-        for i in range(w):
-            fx[:, i] = inverseDFT_1D(fx[:, i])
-
-    elif len(fu.shape) == 3:
-        for ch in range(3):
-            fx[:, :, ch] = inverseDFT_2D(fu[:, :, ch])
-
-    fx = np.real(fx)
-    return fx
-
-
-def inverseFFT_2D(fu):
-    h, w = fu.shape[0], fu.shape[1]
-
-    fx = np.zeros(fu.shape, dtype=complex)
-
-    if len(fu.shape) == 2:
-        for i in range(h):
-            fx[i, :] = inverseFFT_1D(fu[i, :])
-
-        for i in range(w):
-            fx[:, i] = inverseFFT_1D(fx[:, i])
-
-    elif len(fu.shape) == 3:
-        for ch in range(3):
-            fx[:, :, ch] = inverseFFT_2D(fu[:, :, ch])
-
-    fx = np.real(fx)
-    return fx
+from fourier_transform import *
 
 
 def img_FFT(img):
@@ -145,6 +17,88 @@ def img_FFT_inverse(img):
         return inverseFFT_2D(img)
     else:
         raise ValueError("Please input a gray or RGB image!")
+
+
+def findpower2(num):
+    """find the nearest number that is the power of 2"""
+    if num & (num-1) == 0:
+        return num
+
+    bin_num = bin(num)
+    origin_bin_num = str(bin_num)[2:]
+    near_power2 = pow(10, len(origin_bin_num))
+    near_power2 = "0b" + str(near_power2)
+    near_power2 = int(near_power2, base=2)
+
+    return near_power2
+
+
+def image_padding(img):
+    """ padding the image size to power of 2, for fft computation requirement"""
+    if len(img.shape) == 2 or len(img.shape) == 3:
+        h, w = img.shape[0], img.shape[1]
+
+        h_pad = findpower2(h)-h
+        w_pad = findpower2(w)-w
+
+        img = np.pad(img, pad_width=((0, h_pad), (0, w_pad), (0, 0)), mode='constant')
+
+        return img
+
+
+def image_fft(img_path, result_folder_path="result/"):
+    """ read, padding, fft, cut to origin size and save """
+    data_root, img_name = os.path.split(img_path)
+
+    if img_name[-3:] != "png" and img_name[-3:] != "tif":
+        return 0
+
+    if not os.path.exists(result_folder_path):
+        os.mkdir(result_folder_path)
+
+    img_origin = cv2.imread(img_path)
+    img = image_padding(img_origin)
+
+    img_fft = img_FFT(img)
+
+    if len(img_origin) == 2:
+        img_fft = img_fft[:img_origin.shape[0], :img_origin.shape[1]]
+    else:
+        img_fft = img_fft[:img_origin.shape[0], :img_origin.shape[1], :]
+
+    img_fft_complex = img_fft.copy()
+
+    # save real value for human seeing
+    img_fft = np.real(img_fft)
+    name, _ = img_name.split(".")
+    save_img_name = result_folder_path + name + "_fft.png"
+    cv2.imwrite(save_img_name, img_fft)
+
+    return img_fft_complex
+
+
+def image_fft_inverse(img_fft_complex, img_path, result_folder_path="result/"):
+    """ inverse the read fft_img, cut to origin size and save """
+    if not os.path.exists(result_folder_path):
+        os.mkdir(result_folder_path)
+    _, img_name = os.path.split(img_path)
+
+    img_fft = image_padding(img_fft_complex)
+
+    img_origin = img_FFT_inverse(img_fft)
+    img_ifft = np.real(img_origin)
+
+    name, _ = img_name.split(".")
+    save_img_name = result_folder_path + name + "_inverse.png"
+
+    if len(img_origin) == 2:
+        img_ifft = img_ifft[:img_fft_complex.shape[0], :img_fft_complex.shape[1]]
+    else:
+        img_ifft = img_ifft[:img_fft_complex.shape[0], :img_fft_complex.shape[1], :]
+
+    cv2.imwrite(save_img_name, img_ifft)
+
+    return img_origin
 
 
 if __name__ == '__main__':
